@@ -11,13 +11,39 @@
 能移动和点击鼠标、滚动、打字、按组合键、列出和切换窗口。使用者一动鼠标键盘,操作就让位。
 [Coopanion](https://github.com/Pal-AI-Lab/Coopanion) 用它让 Coo 帮你操作电脑。
 
+## 省 token 改造（本地 OCR 拦截）— 本 fork 新增
+
+原版 CUA 把整张缩放后的截图(JPEG)作为附件回执给云端模型,是无障碍树失效时 token 暴涨、缓存不命中的主因。
+本 fork(`HY-pt/cortico-world-cua`)在不改动 koffi 引擎子进程的前提下,在 `cua_screenshot` 这条链路上做了拦截:
+
+1. **主路径（默认）**:截图后在主进程用**系统内置 OCR**（Windows: WinRT `Windows.Media.Ocr`;macOS: `tesseract`）把屏幕转成文字 + 归一化坐标,
+   只把文字和截图像素坐标返回给模型,**高清大图不再上传**。点击直接用返回的坐标(`cua_click(x, y)`),无需模型"看图"。
+2. **视觉兜底（仅在本地 OCR 彻底失败时）**:本地 OCR 一个字都没取到时,才把截图交回 **Coopanion 已配置的视觉 API**——
+   即复用用户已经在 Coopanion 里填好的 Provider/Key,**插件不再要求填第二遍 Key**。
+   - **两级截图**:先围绕"上次坐标"做局部裁剪发小图(省 token),裁剪太小/无坐标时再退回全屏。
+3. **显式要图**:传 `cua_screenshot({ forceImage: true })` 可绕过 OCR,直接拿原始截图(用于确实需要看图、或调试)。
+
+这套逻辑收敛在 `src/local-vision.ts`(OCR + 裁剪),`src/world.ts` 的 `screenshot()` 负责编排三档优先级。
+**不依赖任何"视觉小模型",不下载权重**——OCR 是系统自带能力。
+
+新增配置项（World 配置页 `worlds.cua.vision.*`）:
+
+| 配置 | 默认 | 说明 |
+|---|---|---|
+| `vision.ocr` | `true` | 本地 OCR 拦截:截图转文字不传图,最省 token |
+| `vision.fallback` | `true` | 本地 OCR 失败时,借 Coopanion 已配视觉 API 发图(两级截图);关掉则纯本地 |
+| `vision.cropPadding` | `0.2` | 兜底局部裁剪相对上次坐标的归一化边距,越小越省 token |
+| `vision.ocrLang` | `''` | Windows WinRT OCR 语言(如 `zh-Hans`);留空跟随系统语言 |
+
+> 设计对照:[`cortico-world-localvision`](https://github.com/HY-pt/cortico-world-localvision)(独立思路 PoC)。本 fork 直接落在 CUA 链路里,集成更彻底。
+
 ## 工具
 
 坐标一律是最近一张截图的像素;截图缩放到 `screenshot.maxWidth`×`maxHeight`(默认 1280×800)以内,画上鼠标指针,JPEG 编码。
 
 | 工具 | 作用 |
 |---|---|
-| `cua_screenshot` | 截主屏幕;回执带屏幕与截图尺寸、指针位置、前台窗口标题 |
+| `cua_screenshot(forceImage?)` | 截主屏幕。**默认用本机原生 OCR 把屏幕转成文字+坐标返回,不向云端传图(省 token)**;只有 OCR 取不到文字时才借 Coopanion 已配的视觉 API 发图。传 `forceImage:true` 可绕过 OCR 直接拿原图 |
 | `cua_click(x, y, button, clicks)` | 左/右/中键,单击、双击、三击 |
 | `cua_move(x, y)` | 只移动,用于悬停 |
 | `cua_drag(from, to)` | 按住左键拖动 |

@@ -11,8 +11,8 @@ export const CUA_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   {
     name: 'cua_screenshot',
     tags: ['read', 'snapshot'],
-    description: '截取主屏幕,返回缩放后的图片(画上了鼠标指针)、屏幕与截图尺寸、指针位置和前台窗口标题。',
-    parameters: { type: 'object', properties: {}, required: [] },
+    description: '截取主屏幕。默认先用本机原生 OCR 把屏幕转成文字+坐标并返回(拦截高清大图,不向云端上传图片,省 token);只有当屏幕上没有可识别文字、本地 OCR 彻底失败时,才借助 Coopanion 已配置的视觉 API 发回截图(两级截图:先局部后全屏)。返回文字里含截图像素坐标,可直接用于 cua_click。传 forceImage:true 可绕过 OCR 直接返回原始截图。',
+    parameters: { type: 'object', properties: { forceImage: { type: 'boolean', description: 'true 时跳过本地 OCR,直接返回原始截图图片(用于确实需要看图的场景)' } }, required: [] },
   },
   {
     name: 'cua_click',

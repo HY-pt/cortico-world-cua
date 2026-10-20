@@ -36,7 +36,7 @@ describe.runIf(process.platform === 'win32')('CUA through Core', () => {
       if (turn.n === 0) {
         expect(turn.tools).toEqual(expect.arrayContaining(['cua_screenshot', 'cua_click', 'cua_type', 'end_turn']));
         expect(JSON.stringify(turn.records)).toContain('请把输入框填上');
-        return { calls: [{ name: 'cua_screenshot' }] };
+        return { calls: [{ name: 'cua_screenshot', args: { forceImage: true } }] };
       }
       if (turn.n === 1) {
         const out = outputs(turn).at(-1)!;

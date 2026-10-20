@@ -7,6 +7,7 @@ import { dryMountWorld } from 'cortico/extensions/dry-mount.ts';
 import { parseKeys } from '../src/engine/keys.ts';
 import { appleString, dialogAnswer, macKey, unicodeChunks } from '../src/engine/mac-keys.ts';
 import { downscale, drawCursor, encodeJpeg, fit } from '../src/engine/image.ts';
+import { cropJpeg } from '../src/local-vision.ts';
 import { CUA } from '../src/definition.ts';
 import { CUA_DEFAULTS } from '../src/config.ts';
 import { CuaWorld } from '../src/world.ts';
@@ -51,6 +52,21 @@ describe('image', () => {
     expect(rgba[(7 * 40 + 6) * 4]).toBe(255); // inside is filled white
     const out = jpeg.decode(encodeJpeg(rgba, 40, 30, 80));
     expect([out.width, out.height]).toEqual([40, 30]);
+  });
+});
+
+describe('local-vision cropJpeg (two-level screenshot)', () => {
+  const jpegBytes = (w: number, h: number) => encodeJpeg(new Uint8Array(w * h * 4).fill(128), w, h, 75);
+
+  it('crops around a normalized point and returns a smaller valid JPEG', () => {
+    const crop = cropJpeg(jpegBytes(200, 200), 0.5, 0.5, 0.2)!;
+    expect(crop).not.toBeNull();
+    const img = jpeg.decode(crop, { useTArray: true });
+    expect([img.width, img.height]).toEqual([80, 80]);
+  });
+
+  it('returns null when the clamped crop is too small (off-screen point)', () => {
+    expect(cropJpeg(jpegBytes(200, 200), 0, 0, 0.2)).toBeNull();
   });
 });
 

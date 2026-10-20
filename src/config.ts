@@ -23,6 +23,17 @@ export interface CuaConfigSection extends WorldSection {
   maxYieldWaitMs: number;
   /** Pause between 16-character chunks while typing. */
   typeChunkDelayMs: number;
+  /** 本地视觉拦截层:OCR 优先拦截高清大图,只有本地彻底失败时才借 Coopanion 已配好的 API 发图。 */
+  vision: {
+    /** 本地 OCR（系统内置,免模型）:把截图转成文字+坐标返回,不向云端传图。默认开。 */
+    ocr: boolean;
+    /** 本地 OCR 彻底失败时,是否借用 Coopanion 已配置的视觉 API 把截图发回去。默认开。 */
+    fallback: boolean;
+    /** 两级截图中局部裁剪相对"上次坐标"的归一化边距(0-0.5);越小越省 token。默认 0.2。 */
+    cropPadding: number;
+    /** OCR 语言提示(Windows WinRT,如 zh-Hans/en-US);留空=跟随系统语言自动识别。 */
+    ocrLang: string;
+  };
 }
 
 export const CUA_DEFAULTS: CuaConfigSection = {
@@ -32,6 +43,7 @@ export const CUA_DEFAULTS: CuaConfigSection = {
   userIdleMs: 2000,
   maxYieldWaitMs: 15_000,
   typeChunkDelayMs: 20,
+  vision: { ocr: true, fallback: true, cropPadding: 0.2, ocrLang: '' },
 };
 
 const K = `worlds.${CUA_ID}`;
@@ -51,6 +63,10 @@ export const CUA_CONFIG_GROUP: ConfigGroup = {
       [`${K}.screenshot.quality`]: { type: 'integer', title: '截图质量', minimum: 30, maximum: 95, 'x-hot': true },
       [`${K}.screenshot.afterAction`]: { type: 'boolean', title: '操作后附截图', 'x-hot': true },
       [`${K}.screenshot.settleMs`]: { type: 'integer', title: '截图前等待', minimum: 0, maximum: 5000, 'x-suffix': 'ms', 'x-hot': true },
+      [`${K}.vision.ocr`]: { type: 'boolean', title: '本地OCR拦截', 'x-hot': true, description: '用系统内置 OCR 把截图转成文字,不向云端传图,最省 token。' },
+      [`${K}.vision.fallback`]: { type: 'boolean', title: '视觉兜底(借Coopanion)', 'x-hot': true, description: '本地 OCR 取不到文字时,借助你已配置的视觉 API 发回截图(两级截图);关闭则纯本地。' },
+      [`${K}.vision.cropPadding`]: { type: 'number', title: '兜底裁剪边距', minimum: 0, maximum: 0.5, description: '局部裁剪相对上次坐标的归一化边距,越小越省 token。' },
+      [`${K}.vision.ocrLang`]: { type: 'string', title: 'OCR语言', description: 'Windows WinRT OCR 语言,如 zh-Hans;留空跟随系统。' },
     },
   },
 };

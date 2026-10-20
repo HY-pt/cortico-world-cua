@@ -21,6 +21,7 @@ import { childExecArgv } from 'cortico/extensions/runtime.ts';
 import { CUA_CONFIG_GROUP, CUA_ID, type CuaConfigSection } from './config.ts';
 import { CUA_TOOL_DECLS } from './tools.ts';
 import { fit } from './engine/image.ts';
+import { runOcr, toItems, buildOcrText, cropJpeg } from './local-vision.ts';
 import { parseKeys } from './engine/keys.ts';
 import type { Answer, Button, ChildToMain, EngineRequest, InputResult, ScreenInfo, ScreenshotResult, WindowEntry, Yield } from './engine-ipc.ts';
 
@@ -56,6 +57,8 @@ export class CuaWorld implements World {
   private seq = 0;
   private readonly pending = new Map<number, { done: (v: unknown) => void; fail: (e: Error) => void; timer: NodeJS.Timeout }>();
   private screen: { width: number; height: number } | null = null;
+  /** 最近一次截图时光标的归一化坐标(0-1),供两级截图兜底围绕它裁剪。 */
+  private lastNormPoint: { x: number; y: number } | null = null;
   private engineError: string | null = null;
   /** This turn's answer, asked on first use; cleared when the turn ends. */
   private permission: Promise<Answer> | null = null;
@@ -169,7 +172,7 @@ export class CuaWorld implements World {
 
   tools(): ToolDef[] {
     const handlers: Record<string, (args: Args) => Promise<ToolOutcome>> = {
-      cua_screenshot: () => this.screenshot(''),
+      cua_screenshot: (a) => this.screenshot('', a.forceImage === true),
       cua_click: (a) => this.click(a),
       cua_move: (a) => this.move(a),
       cua_drag: (a) => this.drag(a),
@@ -197,13 +200,56 @@ export class CuaWorld implements World {
     return { idleMs: this.cfg.userIdleMs, maxWaitMs: this.cfg.maxYieldWaitMs };
   }
 
-  async screenshot(lead: string): Promise<ToolOutcome> {
+  async screenshot(lead: string, forceImage = false): Promise<ToolOutcome> {
     const shot = await this.call<ScreenshotResult>({ op: 'screenshot', maxWidth: this.cfg.screenshot.maxWidth, maxHeight: this.cfg.screenshot.maxHeight, quality: this.cfg.screenshot.quality });
     this.screen = shot.screen;
     const seen = this.host?.modelFacts.accepts('image/jpeg') ?? true;
-    const text = `${lead}截图 ${shot.width}×${shot.height}(屏幕 ${shot.screen.width}×${shot.screen.height});鼠标在 ${this.toShot(shot.cursor)};前台窗口「${shot.foreground ?? '无'}」。`
-      + (seen ? '' : '\n当前模型不接收图片,只能读到这段文字。');
-    return { text, blobs: [{ bytes: shot.jpeg, mime: 'image/jpeg', name: 'screen.jpg', fallbackText: `屏幕截图 ${shot.width}×${shot.height}` }] };
+    const base = `${lead}截图 ${shot.width}×${shot.height}(屏幕 ${shot.screen.width}×${shot.screen.height});鼠标在 ${this.toShot(shot.cursor)};前台窗口「${shot.foreground ?? '无'}」。`;
+
+    // 记录"上次坐标"(归一化),供两级截图兜底围绕它裁剪。
+    const sw = shot.screen.width, sh = shot.screen.height;
+    this.lastNormPoint = sw && sh ? { x: shot.cursor.x / sw, y: shot.cursor.y / sh } : null;
+
+    // —— 显式要图:直接返回原始截图(绕过拦截,用于确实需要看图的场景) ——
+    if (forceImage) {
+      return { text: base + (seen ? '' : '\n当前模型不接收图片,只能读到这段文字。'), blobs: [{ bytes: shot.jpeg, mime: 'image/jpeg', name: 'screen.jpg', fallbackText: `屏幕截图 ${shot.width}×${shot.height}` }] };
+    }
+
+    // —— 主路径:本地 OCR 拦截高清大图,只返回文字 + 坐标 ——
+    if (this.cfg.vision.ocr) {
+      try {
+        const { words, w, h } = await runOcr(shot.jpeg, this.cfg.vision.ocrLang || undefined);
+        if (words.length) {
+          const items = toItems(words, w, h);
+          return {
+            text: base + '\n[本地OCR] 已拦截原始截图,仅返回文字与坐标(未上传图片):\n' + buildOcrText(items)
+              + '\n坐标均为截图像素(x,y),可直接用于 cua_click。',
+          };
+        }
+        // 本地 OCR 取到 0 个文字 = 本地视觉"彻底失败",转兜底。
+      } catch {
+        // OCR 异常,转兜底。
+      }
+    }
+
+    // —— 兜底:本地失败,借用 Coopanion 已配置的 API 把截图发回去(两级截图) ——
+    if (this.cfg.vision.fallback) {
+      let bytes: Uint8Array = shot.jpeg;
+      let which = '全屏';
+      // 第一级:围绕上次坐标做局部裁剪,先发小图以节约 token。
+      if (this.lastNormPoint && this.cfg.vision.cropPadding > 0) {
+        const cropped = cropJpeg(shot.jpeg, this.lastNormPoint.x, this.lastNormPoint.y, this.cfg.vision.cropPadding);
+        if (cropped) { bytes = cropped; which = '局部(基于上次坐标)'; }
+      }
+      const warn = seen ? '' : '\n（注意:当前模型不接受图片,可能仍读不到内容。）';
+      return {
+        text: base + `\n[视觉兜底] 本地 OCR 未取到文字,已将${which}截图交回 Coopanion(使用你已配置的视觉 API)分析。${warn}`,
+        blobs: [{ bytes, mime: 'image/jpeg', name: which === '全屏' ? 'screen.jpg' : 'screen_crop.jpg', fallbackText: `屏幕截图 ${which}` }],
+      };
+    }
+
+    // —— 最严格:OCR 与兜底都关,只给文字提示 ——
+    return { text: base + '\n[本地OCR] 未取到文字,且已关闭视觉兜底;请用 cua_windows 等其它方式判断界面。' };
   }
 
   private refuseControl(tool: string): ToolOutcome | null {

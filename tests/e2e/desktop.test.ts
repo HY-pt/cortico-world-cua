@@ -28,6 +28,10 @@ const at = (r: Rect) => shot(center(r));
 beforeAll(async () => {
   Object.assign(cfg, { enabled: true, userIdleMs: 300, maxYieldWaitMs: 8000 });
   cfg.screenshot.settleMs = 250;
+  // 本 e2e 套件直接校验"截图 JPEG + 像素 + 引擎/输入管线",因此关闭本地 OCR 拦截,
+  // 让 cua_screenshot 退回原始截图(走视觉兜底分支),保持像素/尺寸断言不变。
+  // OCR 拦截本身由人工在真机验证(cua_vision 行为)。
+  cfg.vision.ocr = false;
   world = new CuaWorld({ cfg, timezone: 'Asia/Shanghai' });
   await world.start(new FakeHost());
   ({ target, ready } = await Target.open(`CUA Target ${process.pid}`));

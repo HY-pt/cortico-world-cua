@@ -61,7 +61,25 @@ function jpegSize(bytes: Uint8Array): { w: number; h: number } {
  */
 export async function runOcr(bytes: Uint8Array, ocrLang?: string): Promise<OcrResult> {
   if (platform() === 'win32') return ocrWinRt(bytes, ocrLang);
-  return ocrTesseract(bytes);
+  return ocrTesseract(bytes, ocrLang);
+}
+
+/**
+ * 语言码归一化：配置里既可能填 WinRT 的 BCP-47（zh-Hans/en-US），
+ * 也可能填 tesseract 语言名（chi_sim/eng）。统一映射成 tesseract 认识的名字。
+ * 留空返回 eng（历史上 macOS 一直用 eng，保持默认行为不变）。
+ */
+export function tesseractLang(ocrLang?: string): string {
+  const l = (ocrLang || '').trim();
+  if (!l) return 'eng';
+  const k = l.toLowerCase();
+  if (k === 'zh' || k.startsWith('zh-hans') || k.startsWith('zh-cn') || k.startsWith('zh-sg')) return 'chi_sim';
+  if (k.startsWith('zh-hant') || k.startsWith('zh-tw') || k.startsWith('zh-hk')) return 'chi_tra';
+  if (k === 'en' || k.startsWith('en-')) return 'eng';
+  if (k === 'ja' || k.startsWith('ja-')) return 'jpn';
+  if (k === 'ko' || k.startsWith('ko-')) return 'kor';
+  // 已是 tesseract 语言名（chi_sim / eng / jpn ...），原样使用
+  return l;
 }
 
 async function ocrWinRt(bytes: Uint8Array, ocrLang?: string): Promise<OcrResult> {
@@ -125,13 +143,13 @@ async function ocrWinRt(bytes: Uint8Array, ocrLang?: string): Promise<OcrResult>
   }
 }
 
-async function ocrTesseract(bytes: Uint8Array): Promise<OcrResult> {
+async function ocrTesseract(bytes: Uint8Array, ocrLang?: string): Promise<OcrResult> {
   const imgFile = join(tmpdir(), `cua-ocr-${Date.now()}.jpg`);
   const base = join(tmpdir(), `cua-ocr-${Date.now()}`);
   await writeFile(imgFile, Buffer.from(bytes));
   const { w: W, h: H } = jpegSize(bytes);
   try {
-    await exec('tesseract', [imgFile, base, '-l', 'eng', 'tsv']);
+    await exec('tesseract', [imgFile, base, '-l', tesseractLang(ocrLang), 'tsv']);
   } catch {
     return { words: [], w: W, h: H };
   }

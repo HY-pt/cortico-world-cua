@@ -7,7 +7,7 @@ import { dryMountWorld } from 'cortico/extensions/dry-mount.ts';
 import { parseKeys } from '../src/engine/keys.ts';
 import { appleString, dialogAnswer, macKey, unicodeChunks } from '../src/engine/mac-keys.ts';
 import { downscale, drawCursor, encodeJpeg, fit } from '../src/engine/image.ts';
-import { cropJpeg } from '../src/local-vision.ts';
+import { cropJpeg, tesseractLang } from '../src/local-vision.ts';
 import { CUA } from '../src/definition.ts';
 import { CUA_DEFAULTS } from '../src/config.ts';
 import { CuaWorld } from '../src/world.ts';
@@ -67,6 +67,19 @@ describe('local-vision cropJpeg (two-level screenshot)', () => {
 
   it('returns null when the clamped crop is too small (off-screen point)', () => {
     expect(cropJpeg(jpegBytes(200, 200), 0, 0, 0.2)).toBeNull();
+  });
+});
+
+describe('local-vision tesseractLang (macOS OCR language)', () => {
+  it('maps WinRT/BCP-47 codes to tesseract names and keeps tesseract names as-is', () => {
+    expect(tesseractLang()).toBe('eng');
+    expect(tesseractLang('')).toBe('eng');
+    expect(tesseractLang('zh-Hans')).toBe('chi_sim');
+    expect(tesseractLang('zh-CN')).toBe('chi_sim');
+    expect(tesseractLang('zh-Hant')).toBe('chi_tra');
+    expect(tesseractLang('en-US')).toBe('eng');
+    expect(tesseractLang('ja-JP')).toBe('jpn');
+    expect(tesseractLang('chi_sim')).toBe('chi_sim');
   });
 });
 

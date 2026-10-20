@@ -39,6 +39,10 @@
 4. 在 **「World 总览」** 里启用 `cua`（电脑操作）；或在 bot 的 `declares` 里加上 `cua`。
 5. 无需在插件里填任何视觉 Key——直接复用你 Coopanion 已配的 Provider。
 
+> **安装时会看到的两条提示（都正常）**
+> - 扩展页可能提示「按 world 契约 v5 编写，本框架是 v6」——这是**正常的**，原版 cua 也是 v5，框架经过渡层加载，功能不受影响。
+> - 若安装报 pnpm / corepack 错误（例如 `Cannot find module ...pnpm.cjs`），是 corepack 缓存坏了：先 `corepack disable pnpm`，再 `npm i -g pnpm@11`（或修好 corepack）后重试。
+
 装好后正常使用即可：让 Coo「看一眼屏幕」「点一下某按钮」，你会发现它的回复里 `cua_screenshot` 返回的是文字和坐标，而不再是图片。
 
 ## 配置（可选）
@@ -50,7 +54,7 @@
 | `vision.ocr` | `true` | 本机 OCR 拦截：截图转文字、不传图，最省 token | 保持开启 |
 | `vision.fallback` | `true` | OCR 失败时，借 Coopanion 已配视觉 API 发图（两级截图）；关掉则纯本地、永不传图 | 想"绝不传图"就关掉 |
 | `vision.cropPadding` | `0.2` | 兜底局部裁剪相对上次坐标的归一化边距；越小越省 token，太大则省得少 | 一般不用改 |
-| `vision.ocrLang` | `''` | Windows WinRT OCR 语言代码，如 `zh-Hans`；留空跟随系统语言 | 中文识别不准时填 `zh-Hans` |
+| `vision.ocrLang` | `''` | OCR 语言：Windows 填 WinRT 码（如 `zh-Hans`），macOS 填 tesseract 码（如 `chi_sim`）；留空时 Windows 跟随系统、macOS 用英文 | 中文识别不准时填 `zh-Hans`（Win）/ `chi_sim`（Mac） |
 
 > 想做到**绝对零图片上传**（最省、最隐私）：把 `vision.fallback` 设成 `false`。此时只有在屏幕有文字时才能"看"，纯图形界面会退回文字提示——但 token 开销最低。
 
@@ -87,7 +91,7 @@ A：对比改造前后的费用明细，重点看 **image token 数量** 和 **c
 **Q：屏幕上有字但 Coo 说"看不清" / 走了传图？**
 A：通常是 OCR 没识别到。检查：
 - **Windows**：是否装了对应语言的 OCR 语言包（设置 → 时间和语言 → 语言 → 中文(中华人民共和国) → 选项 → 下载"光学字符识别"）；或在 `vision.ocrLang` 显式填 `zh-Hans`。
-- **macOS**：需安装 `tesseract`（`brew install tesseract` + 中文数据包），并在「系统设置 → 隐私与安全性」授予「录屏与系统录音」「辅助功能」权限。
+- **macOS**：需安装 `tesseract`（`brew install tesseract tesseract-lang`），中文还要在 `vision.ocrLang` 里填 `chi_sim`（填 `zh-Hans` 会自动映射到 `chi_sim`），默认留空时只做英文；并在「系统设置 → 隐私与安全性」授予「录屏与系统录音」「辅助功能」权限。
 
 **Q：macOS 上点不动 / 截不到图？**
 A：给运行 Coopanion 的应用授予「录屏与系统录音」（截图、读窗口标题）和「辅助功能」（鼠标键盘）权限；首次使用系统会弹窗问。
@@ -112,12 +116,13 @@ A：除了"截图默认返回文字而非图片"外，鼠标 / 键盘 / 窗口 /
 
 - 拦截逻辑在 `src/local-vision.ts`（系统 OCR + 两级裁剪），编排在 `src/world.ts` 的 `screenshot()`；`vision.*` 配置在 `src/config.ts`；`cua_screenshot` 增加 `forceImage` 参数在 `src/tools.ts`。
 - **不改动 koffi 引擎子进程**：OCR 与裁剪都在主进程用已依赖的 `jpeg-js` 完成，风险低、便于本地加载端到端验证。
-- 校验与测试：
+- 校验与测试（仓库用 pnpm 管理，带 `pnpm-lock.yaml`；没有 pnpm 时用 `corepack pnpm`）：
   ```bash
-  npm install
-  npx tsc --noEmit                 # 类型检查
-  npx vitest run                   # 单元测试（含干装载校验）
-  npx vitest run tests/e2e/desktop.test.ts  # 端到端：会真机移动鼠标、打字，谨慎运行
+  corepack pnpm install            # 或已装 pnpm：pnpm install
+  pnpm typecheck                   # = tsc --noEmit，类型检查
+  pnpm test                        # 单元测试（含 dryMountWorld 干装载校验）
+  pnpm test:e2e                    # 端到端：会真机移动鼠标、打字，谨慎运行
+  # 只跑桌面 e2e：pnpm exec vitest run tests/e2e/desktop.test.ts --config vitest.e2e.config.ts
   ```
 - 端到端测试打开一个置顶的 WinForms 窗口（`tests/e2e/target-form.ps1`），把关心的屏幕坐标和收到的输入打印出来，断言洋红色块出现在窗口自报位置、文本输入一致等。
 
